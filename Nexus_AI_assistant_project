@@ -1,0 +1,894 @@
+import streamlit as st
+from google import genai
+import speech_recognition as sr
+import pyttsx3
+from PIL import Image
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from twilio.rest import Client
+import json
+
+
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
+st.set_page_config(
+    page_title="NEXUS AI",
+    page_icon="⚡",
+    layout="wide"
+)
+
+
+# =========================================================
+# MODERN STYLISH UI
+# =========================================================
+
+st.markdown("""
+<style>
+.stApp {
+    background:
+        radial-gradient(circle at 10% 10%, rgba(124, 58, 237, 0.20), transparent 30%),
+        radial-gradient(circle at 90% 15%, rgba(168, 85, 247, 0.14), transparent 28%),
+        linear-gradient(135deg, #080611 0%, #110b20 48%, #080611 100%);
+    color: #f7f3ff;
+}
+.main-header {
+    font-size: 2.8rem;
+    font-weight: 800;
+    text-align: center;
+    background: linear-gradient(90deg, #c084fc, #a78bfa, #e9d5ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 10px 0 4px 0;
+}
+.sub-header {
+    text-align: center;
+    color: #b8a9d9;
+    margin-bottom: 22px;
+}
+.section-card {
+    background: rgba(31, 20, 52, 0.72);
+    border: 1px solid rgba(192, 132, 252, 0.22);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 10px 35px rgba(0,0,0,0.28);
+}
+.mode-card {
+    background: linear-gradient(135deg, rgba(124,58,237,.18), rgba(168,85,247,.08));
+    border: 1px solid rgba(192,132,252,.24);
+    border-radius: 16px;
+    padding: 18px;
+    margin: 8px 0 18px 0;
+}
+.stButton > button, .stFormSubmitButton > button {
+    border-radius: 10px;
+    border: 1px solid rgba(192,132,252,.35);
+    background: linear-gradient(135deg, #6d28d9, #9333ea);
+    color: white;
+    font-weight: 650;
+}
+div[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #10091d 0%, #0b0713 100%);
+}
+.user-bubble {
+    background: rgba(124,58,237,.12);
+    border: 1px solid rgba(192,132,252,.25);
+    border-radius: 12px;
+    padding: 12px 18px;
+    margin: 8px 0;
+    color: #f3e8ff;
+}
+.ai-bubble {
+    background: rgba(168,85,247,.10);
+    border: 1px solid rgba(192,132,252,.20);
+    border-radius: 12px;
+    padding: 12px 18px;
+    margin: 8px 0;
+    color: #ffffff;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+st.markdown(
+    '<div class="main-header">⚡ NEXUS AI</div>',
+    unsafe_allow_html=True
+)
+
+
+# =========================================================
+# SIDEBAR CONTROLS
+# =========================================================
+
+with st.sidebar:
+
+    st.header("⚙️ Settings & Features")
+
+    api_key = st.text_input(
+        "Enter Gemini API Key:",
+        type="password"
+    )
+
+    st.markdown("---")
+
+    # -----------------------------------------------------
+    # PERSONA
+    # -----------------------------------------------------
+
+    st.subheader("🎯 Persona / Role Switcher")
+
+    persona = st.selectbox(
+        "Choose AI Role:",
+        [
+            "General Assistant",
+            "Code Expert & Debugger",
+            "Interview Trainer",
+            "Marathi Tutor"
+        ]
+    )
+
+    st.markdown("---")
+
+    # -----------------------------------------------------
+    # VOICE SETTINGS
+    # -----------------------------------------------------
+
+    st.subheader("🔊 Voice & Language Settings")
+
+    enable_voice = st.checkbox(
+        "Enable Text-to-Speech",
+        value=True
+    )
+
+    voice_lang = st.selectbox(
+        "Speech Language:",
+        [
+            "Marathi (mr)",
+            "Hindi (hi)",
+            "English (en)"
+        ]
+    )
+
+    lang_code = voice_lang.split("(")[1].replace(")", "")
+
+    st.markdown("---")
+
+    # -----------------------------------------------------
+    # IMAGE UPLOAD
+    # -----------------------------------------------------
+
+    st.subheader("📁 Multimodal File Upload")
+
+    uploaded_file = st.file_uploader(
+        "Upload Image/Photo",
+        type=["png", "jpg", "jpeg"]
+    )
+
+
+# =========================================================
+# SCHEDULED EMAIL
+# =========================================================
+
+@st.cache_resource
+def get_scheduler():
+
+    scheduler = BackgroundScheduler()
+
+    scheduler.start()
+
+    return scheduler
+
+
+scheduler = get_scheduler()
+
+
+# =========================================================
+# SEND EMAIL FUNCTION
+# =========================================================
+
+def send_scheduled_email(
+    sender_email,
+    sender_password,
+    recipient_email,
+    subject,
+    message_body
+):
+
+    try:
+
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+
+        msg = MIMEMultipart()
+
+        msg["From"] = sender_email
+        msg["To"] = recipient_email
+        msg["Subject"] = subject
+
+        msg.attach(
+            MIMEText(message_body, "plain")
+        )
+
+        server = smtplib.SMTP(
+            smtp_server,
+            smtp_port
+        )
+
+        server.starttls()
+
+        server.login(
+            sender_email,
+            sender_password
+        )
+
+        server.send_message(msg)
+
+        server.quit()
+
+        print(
+            f"[SUCCESS] Mail successfully sent to {recipient_email}"
+        )
+
+    except Exception as e:
+
+        print(
+            f"[ERROR] Failed to send email: {e}"
+        )
+
+
+# =========================================================
+# SEND WHATSAPP FUNCTION - TWILIO TRIAL
+# =========================================================
+
+def send_scheduled_whatsapp(
+    account_sid,
+    auth_token,
+    whatsapp_from,
+    recipient_whatsapp,
+    content_sid,
+    content_variables
+):
+    try:
+        if not whatsapp_from.startswith("whatsapp:"):
+            whatsapp_from = f"whatsapp:{whatsapp_from}"
+
+        if not recipient_whatsapp.startswith("whatsapp:"):
+            recipient_whatsapp = f"whatsapp:{recipient_whatsapp}"
+
+        twilio_client = Client(account_sid, auth_token)
+
+        # Twilio Trial requires an approved Content Template.
+        message = twilio_client.messages.create(
+            from_=whatsapp_from,
+            to=recipient_whatsapp,
+            content_sid=content_sid,
+            content_variables=json.dumps(content_variables)
+        )
+
+        print(
+            f"[SUCCESS] WhatsApp template message sent to "
+            f"{recipient_whatsapp}. Message SID: {message.sid}"
+        )
+
+    except Exception as e:
+        print(f"[ERROR] Failed to send WhatsApp message: {e}")
+
+
+# =========================================================
+# NEXUS AI MODE SELECTOR
+# =========================================================
+
+st.markdown('<div class="sub-header">Choose what you want NEXUS AI to do</div>', unsafe_allow_html=True)
+
+mode = st.radio(
+    "Select a mode",
+    ["🤖 General Chat", "📧 Email Trigger", "💬 WhatsApp Trigger"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="nexus_mode"
+)
+
+st.markdown(f'<div class="mode-card"><b>Current mode:</b> {mode}</div>', unsafe_allow_html=True)
+
+if mode == "📧 Email Trigger":
+
+    st.title("📧 Scheduled Email Sender")
+
+    with st.form("schedule_email_form"):
+
+        recipient = st.text_input(
+            "Recipient Email (ज्याला मेल पाठवायचा आहे):"
+        )
+
+        subject = st.text_input(
+            "Email Subject (विषय):"
+        )
+
+        body = st.text_area(
+            "Email Content/Body (मजकूर):"
+        )
+
+        send_date = st.date_input(
+            "कोणत्या तारखेला पाठवायचा आहे?"
+        )
+
+        send_time = st.time_input(
+            "कोणत्या वेळेला पाठवायचा आहे?"
+        )
+
+        sender_email = st.text_input(
+            "तुमचा Gmail ID:"
+        )
+
+        sender_password = st.text_input(
+            "तुमचा Gmail App Password:",
+            type="password"
+        )
+
+        submit_btn = st.form_submit_button(
+            "Schedule Email"
+        )
+
+    if submit_btn:
+        if recipient and subject and body and sender_email and sender_password:
+            scheduled_datetime = datetime.combine(send_date, send_time)
+
+            if scheduled_datetime <= datetime.now():
+                st.error("कृपया भविष्यातील (Future) तारीख आणि वेळ निवडा!")
+            else:
+                scheduler.add_job(
+                    send_scheduled_email,
+                    "date",
+                    run_date=scheduled_datetime,
+                    args=[
+                        sender_email,
+                        sender_password,
+                        recipient,
+                        subject,
+                        body
+                    ]
+                )
+                st.success(
+                    f"✅ ईमेल यशस्वीरित्या शेड्यूल झाला आहे! "
+                    f"तो {scheduled_datetime.strftime('%Y-%m-%d %H:%M')} ला आपोआप पाठवला जाईल."
+                )
+        else:
+            st.warning("कृपया सर्व आवश्यक माहिती भरा!")
+
+elif mode == "💬 WhatsApp Trigger":
+
+    st.title("💬 Scheduled WhatsApp Sender")
+
+    st.info(
+        "Twilio Trial: WhatsApp messages must use a Twilio-provided "
+        "approved template. Custom free-text messages are not available "
+        "on the Trial account."
+    )
+
+    with st.form("schedule_whatsapp_form"):
+
+        recipient_whatsapp = st.text_input(
+            "Recipient WhatsApp Number (उदा. +919876543210):",
+            placeholder="+919876543210"
+        )
+
+        template_name = st.selectbox(
+            "WhatsApp Template:",
+            [
+                "Appointment Reminder",
+                "Order Notification",
+                "Verification Code"
+            ]
+        )
+
+        content_sid = st.text_input(
+            "Template Content SID (starts with HX...):",
+            placeholder="HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            help=(
+                "Copy the Content SID of the Twilio-provided Trial "
+                "template from the Twilio Try out WhatsApp page."
+            )
+        )
+
+        st.markdown("### Template Details")
+
+        if template_name == "Appointment Reminder":
+
+            st.caption(
+                "Your appointment is coming up on {{1}} at {{2}}"
+            )
+
+            appointment_date = st.text_input(
+                "Appointment Date ({{1}}):",
+                placeholder="2026/09/25"
+            )
+
+            appointment_time = st.text_input(
+                "Appointment Time ({{2}}):",
+                placeholder="10:30 AM"
+            )
+
+            content_variables = {
+                "1": appointment_date,
+                "2": appointment_time
+            }
+
+        elif template_name == "Order Notification":
+
+            st.caption(
+                "Your {{1}} order of {{2}} has shipped and should be "
+                "delivered on {{3}}. Details: {{4}}"
+            )
+
+            order_type = st.text_input(
+                "Order Type / Name ({{1}}):",
+                placeholder="Laptop"
+            )
+
+            order_number = st.text_input(
+                "Order Number ({{2}}):",
+                placeholder="ORD12345"
+            )
+
+            delivery_date = st.text_input(
+                "Delivery Date ({{3}}):",
+                placeholder="2026/09/28"
+            )
+
+            order_details = st.text_input(
+                "Details ({{4}}):",
+                placeholder="Track your order"
+            )
+
+            content_variables = {
+                "1": order_type,
+                "2": order_number,
+                "3": delivery_date,
+                "4": order_details
+            }
+
+        else:
+
+            st.caption("Your {{1}} code is {{2}}")
+
+            verification_type = st.text_input(
+                "Verification Type ({{1}}):",
+                placeholder="verification"
+            )
+
+            verification_code = st.text_input(
+                "Verification Code ({{2}}):",
+                placeholder="123456"
+            )
+
+            content_variables = {
+                "1": verification_type,
+                "2": verification_code
+            }
+
+        whatsapp_send_date = st.date_input(
+            "कोणत्या तारखेला WhatsApp मेसेज पाठवायचा आहे?"
+        )
+
+        whatsapp_send_time = st.time_input(
+            "कोणत्या वेळेला WhatsApp मेसेज पाठवायचा आहे?"
+        )
+
+        twilio_account_sid = st.text_input(
+            "Twilio Account SID:",
+            type="password"
+        )
+
+        twilio_auth_token = st.text_input(
+            "Twilio Auth Token:",
+            type="password"
+        )
+
+        whatsapp_from = st.text_input(
+            "Twilio WhatsApp Sender:",
+            value="+14155238886",
+            help="Use the WhatsApp-enabled sender shown in your Twilio Trial page."
+        )
+
+        whatsapp_submit_btn = st.form_submit_button(
+            "Schedule WhatsApp"
+        )
+
+    if whatsapp_submit_btn:
+
+        required_values = [
+            recipient_whatsapp,
+            content_sid,
+            twilio_account_sid,
+            twilio_auth_token,
+            whatsapp_from
+        ]
+
+        variables_filled = all(
+            str(value).strip()
+            for value in content_variables.values()
+        )
+
+        if all(required_values) and variables_filled:
+
+            whatsapp_scheduled_datetime = datetime.combine(
+                whatsapp_send_date,
+                whatsapp_send_time
+            )
+
+            if whatsapp_scheduled_datetime <= datetime.now():
+
+                st.error(
+                    "कृपया भविष्यातील (Future) तारीख आणि वेळ निवडा!"
+                )
+
+            elif not content_sid.startswith("HX"):
+
+                st.error(
+                    "❌ Invalid Content SID. Twilio Content SID "
+                    "usually starts with HX."
+                )
+
+            else:
+
+                scheduler.add_job(
+                    send_scheduled_whatsapp,
+                    "date",
+                    run_date=whatsapp_scheduled_datetime,
+                    args=[
+                        twilio_account_sid,
+                        twilio_auth_token,
+                        whatsapp_from,
+                        recipient_whatsapp,
+                        content_sid,
+                        content_variables
+                    ]
+                )
+
+                st.success(
+                    f"✅ WhatsApp Template successfully scheduled! "
+                    f"It will be sent on "
+                    f"{whatsapp_scheduled_datetime.strftime('%Y-%m-%d %H:%M')}."
+                )
+
+                st.caption(
+                    "The recipient must be verified/joined in your "
+                    "Twilio WhatsApp Trial environment."
+                )
+
+        else:
+
+            st.warning(
+                "कृपया Recipient, Content SID, Twilio credentials, "
+                "and all template values भरा!"
+            )
+
+else:
+    st.title("🤖 NEXUS AI Chat")
+    st.caption("Ask questions, upload an image, use voice input, or work with your selected AI persona.")
+
+# =========================================================
+# INITIALIZE GEMINI CLIENT
+# =========================================================
+
+client = None
+
+if api_key:
+
+    try:
+
+        client = genai.Client(
+            api_key=api_key
+        )
+
+        st.sidebar.success(
+            "✅ API Connected Successfully!"
+        )
+
+    except Exception as e:
+
+        st.sidebar.error(
+            f"❌ API Error: {type(e).__name__}: {e}"
+        )
+
+else:
+
+    st.info(
+        "👈 सुरू करण्यासाठी Sidebar मध्ये API Key टाका."
+    )
+
+
+# =========================================================
+# PERSONA PROMPTS
+# =========================================================
+
+persona_prompts = {
+
+    "General Assistant":
+        "You are a helpful, smart AI assistant.",
+
+    "Code Expert & Debugger":
+        "You are an expert software developer. "
+        "Fix errors and provide clean code with explanations.",
+
+    "Interview Trainer":
+        "You are an interviewer. "
+        "Ask technical questions and give feedback on user answers.",
+
+    "Marathi Tutor":
+        "You are a friendly tutor. "
+        "Respond primarily in simple and natural Marathi."
+}
+
+
+# =========================================================
+# SESSION STATE
+# =========================================================
+
+if "messages" not in st.session_state:
+
+    st.session_state.messages = []
+
+
+# =========================================================
+# VOICE INPUT FUNCTION
+# =========================================================
+
+def listen_user():
+
+    r = sr.Recognizer()
+
+    try:
+
+        with sr.Microphone() as source:
+
+            st.toast(
+                "🎤 ऐकत आहे... बोला!",
+                icon="🎙️"
+            )
+
+            audio = r.listen(
+                source,
+                timeout=5
+            )
+
+            return r.recognize_google(
+                audio,
+                language="mr-IN"
+            )
+
+    except Exception:
+
+        return None
+
+
+# =========================================================
+# RENDER CHAT HISTORY
+# =========================================================
+
+for msg in st.session_state.messages:
+
+    if msg["role"] == "user":
+
+        st.markdown(
+            f'''
+            <div class="user-bubble">
+                <b>👤 You:</b> {msg["text"]}
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
+
+    else:
+
+        st.markdown(
+            f'''
+            <div class="ai-bubble">
+                <b>🤖 Nexus AI:</b> {msg["text"]}
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
+
+
+# =========================================================
+# CHAT INPUT
+# =========================================================
+
+col1, col2 = st.columns([5, 1])
+
+
+with col1:
+
+    user_input = st.chat_input(
+        "काहीही विचारा किंवा फोटोबद्दल प्रश्न विचारा..."
+    )
+
+
+with col2:
+
+    voice_btn = st.button(
+        "🎙️ Speak",
+        use_container_width=True
+    )
+
+
+# =========================================================
+# VOICE BUTTON
+# =========================================================
+
+if voice_btn:
+
+    spoken_text = listen_user()
+
+    if spoken_text:
+
+        user_input = spoken_text
+
+
+# =========================================================
+# GENERATE GEMINI RESPONSE
+# =========================================================
+
+if user_input:
+
+    if not client:
+
+        st.error(
+            "कृपया आधी Sidebar मध्ये API Key टाका!"
+        )
+
+    else:
+
+        # -------------------------------------------------
+        # STORE USER MESSAGE
+        # -------------------------------------------------
+
+        st.session_state.messages.append(
+            {
+                "role": "user",
+                "text": user_input
+            }
+        )
+
+        st.markdown(
+            f'''
+            <div class="user-bubble">
+                <b>👤 You:</b> {user_input}
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
+
+        # -------------------------------------------------
+        # GENERATE RESPONSE
+        # -------------------------------------------------
+
+        with st.spinner("विचार करत आहे..."):
+
+            try:
+
+                system_instruction = persona_prompts[
+                    persona
+                ]
+
+                prompt = (
+                    f"{system_instruction}\n"
+                    f"User Question: {user_input}"
+                )
+
+                contents_list = [prompt]
+
+                # -------------------------------------------------
+                # ADD IMAGE IF UPLOADED
+                # -------------------------------------------------
+
+                if uploaded_file:
+
+                    img = Image.open(
+                        uploaded_file
+                    )
+
+                    contents_list.append(img)
+
+                # -------------------------------------------------
+                # GEMINI API CALL
+                # -------------------------------------------------
+
+                response = client.models.generate_content(
+
+                    model="gemini-2.5-flash",
+
+                    contents=contents_list
+                )
+
+                ai_text = response.text
+
+                # -------------------------------------------------
+                # STORE AI RESPONSE
+                # -------------------------------------------------
+
+                st.session_state.messages.append(
+                    {
+                        "role": "ai",
+                        "text": ai_text
+                    }
+                )
+
+                # -------------------------------------------------
+                # DISPLAY AI RESPONSE
+                # -------------------------------------------------
+
+                st.markdown(
+                    f'''
+                    <div class="ai-bubble">
+                        <b>🤖 Nexus AI:</b> {ai_text}
+                    </div>
+                    ''',
+                    unsafe_allow_html=True
+                )
+
+                # -------------------------------------------------
+                # TEXT TO SPEECH
+                # -------------------------------------------------
+
+                if enable_voice:
+
+                    try:
+
+                        engine = pyttsx3.init()
+
+                        engine.say(ai_text)
+
+                        engine.runAndWait()
+
+                    except Exception as voice_error:
+
+                        st.warning(
+                            f"Voice output error: {voice_error}"
+                        )
+
+            except Exception as e:
+
+                st.error(
+                    f"Gemini Error: {type(e).__name__}: {e}"
+                )
+
+
+# =========================================================
+# EXPORT CHAT HISTORY
+# =========================================================
+
+if st.session_state.messages:
+
+    chat_text = "\n\n".join(
+
+        [
+            f"{m['role'].upper()}: {m['text']}"
+            for m in st.session_state.messages
+        ]
+    )
+
+    st.sidebar.markdown("---")
+
+    st.sidebar.download_button(
+
+        "📥 Export Chat History",
+
+        chat_text,
+
+        file_name="chat_history.txt"
+    )
+
+
+#  account sid=AC2a0ed0ba43051ed03f2187bb4f06cfed
+# account token=230b45636a391022c9492d7c614b146b
+
+# API key : AQ.Ab8RN6JT7lpCsS4SIikqvh4z_0eYp0hCOaGWWjO889_MZrC2Xg
+
+
+# project app password : qtxo evcr ebot wmxn
